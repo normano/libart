@@ -885,6 +885,7 @@ int art_iter(art_tree *t, art_callback cb, void *data) {
  * @return 0 on success.
  */
 static int leaf_prefix_matches(const art_leaf *n, const unsigned char *prefix, int prefix_len) {
+
     // Fail if the key length is too short
     if (n->key_len < (uint32_t)prefix_len) return 1;
 
@@ -892,21 +893,9 @@ static int leaf_prefix_matches(const art_leaf *n, const unsigned char *prefix, i
     return memcmp(n->key, prefix, prefix_len);
 }
 
-/**
- * Iterates through the entries pairs in the map,
- * invoking a callback for each that matches a given prefix.
- * The call back gets a key, value for each and returns an integer stop value.
- * If the callback returns non-zero, then the iteration stops.
- * @arg t The tree to iterate over
- * @arg prefix The prefix of keys to read
- * @arg prefix_len The length of the prefix
- * @arg cb The callback function to invoke
- * @arg data Opaque handle passed to the callback
- * @return 0 on success, or the return of the callback.
- */
-int art_iter_prefix(art_tree *t, const unsigned char *key, int key_len, art_callback cb, void *data) {
+static int art_iter_prefix_inner(art_node *n, const unsigned char *key, int key_len, art_callback cb, void *data)  {
+
     art_node **child;
-    art_node *n = t->root;
     int prefix_len, depth = 0;
     while (n) {
         // Might be a leaf
@@ -961,4 +950,107 @@ int art_iter_prefix(art_tree *t, const unsigned char *key, int key_len, art_call
         depth++;
     }
     return 0;
+}
+
+/**
+ * Iterates through the entries pairs in the map,
+ * invoking a callback for each that matches a given prefix.
+ * The call back gets a key, value for each and returns an integer stop value.
+ * If the callback returns non-zero, then the iteration stops.
+ * @arg t The tree to iterate over
+ * @arg prefix The prefix of keys to read
+ * @arg prefix_len The length of the prefix
+ * @arg cb The callback function to invoke
+ * @arg data Opaque handle passed to the callback
+ * @return 0 on success, or the return of the callback.
+ */
+int art_iter_prefix(art_tree *t, const unsigned char *key, int key_len, art_callback cb, void *data) {
+    art_node *n = t->root;
+
+    return art_iter_prefix_inner(n, key, key_len, cb, data);
+}
+
+static int art_iter_fuzzy_inner(art_node *n, const unsigned char *key, int key_len, int fuzzy_count, int depth,
+art_callback cb, void *data
+) {
+
+    // Handle base cases
+    if (!n || depth > fuzzy_count) return 0;
+
+    if (IS_LEAF(n)) {
+
+      art_leaf* l = LEAF_RAW(n);
+      // Fail if the key length is too short
+      if ((l->key_len - depth) < (uint32_t)key_len) return 1;
+
+      // Compare the keys
+      unsigned char* key_ptr = l->key + depth;
+      int possible_depth = l->key_len - depth - key_len;
+
+      if (possible_depth > fuzzy_count) {
+        possible_depth = fuzzy_count;
+      }
+
+      for (; possible_depth-- > 0; key_ptr++) {
+        int is_not_fuzzy_prefix = memcmp(key_ptr, key, key_len);
+        if (!is_not_fuzzy_prefix) {
+          return cb(data, (const unsigned char*)l->key, l->key_len, l->value);
+        }
+      }
+      return 0;
+    }
+
+    int next_depth = depth + 1;
+    int idx, res;
+    switch (n->type) {
+        case NODE4:
+            for (int i=0; i < n->num_children; i++) {
+
+                art_iter_prefix_inner(((art_node4*)n)->children[i], key, key_len, cb, data);
+                art_iter_fuzzy_inner(((art_node4*)n)->children[i], key, key_len, fuzzy_count, next_depth, cb, data);
+            }
+            break;
+
+        case NODE16:
+            for (int i=0; i < n->num_children; i++) {
+
+                art_iter_prefix_inner(((art_node16*)n)->children[i], key, key_len, cb, data);
+                art_iter_fuzzy_inner(((art_node16*)n)->children[i], key, key_len, fuzzy_count, next_depth, cb, data);
+            }
+            break;
+
+        case NODE48:
+            for (int i=0; i < 256; i++) {
+                idx = ((art_node48*)n)->keys[i];
+                if (!idx) continue;
+
+                art_iter_prefix_inner(((art_node48*)n)->children[idx-1], key, key_len, cb, data);
+                art_iter_fuzzy_inner(((art_node48*)n)->children[idx-1], key, key_len, fuzzy_count, next_depth, cb, data);
+            }
+            break;
+
+        case NODE256:
+            for (int i=0; i < 256; i++) {
+                if (!((art_node256*)n)->children[i]) {
+                  continue;
+                }
+
+                art_iter_prefix_inner(((art_node256*)n)->children[i], key, key_len, cb, data);
+                art_iter_fuzzy_inner(((art_node256*)n)->children[i], key, key_len, fuzzy_count, next_depth, cb, data);
+            }
+            break;
+
+        default:
+            abort();
+    }
+    return 0;
+}
+
+/**
+ * Find all words that match the key within the fuzzy count
+ */
+int art_iter_fuzzy(art_tree *t, const unsigned char *key, int key_len, int fuzzy_count, art_callback cb, void *data) {
+  art_node *n = t->root;
+
+  return art_iter_fuzzy_inner(n, key, key_len, fuzzy_count, 0, cb, data);
 }

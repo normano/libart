@@ -197,6 +197,7 @@ int art_iter(art_tree *t, art_callback cb, void *data);
  */
 int art_iter_prefix(art_tree *t, const unsigned char *prefix, int prefix_len, art_callback cb, void *data);
 
+int art_iter_fuzzy(art_tree *t, const unsigned char *key, int key_len, int fuzzy_count, art_callback cb, void *data);
 #ifdef __cplusplus
 }
 #endif
