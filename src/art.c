@@ -260,34 +260,45 @@ static int leaf_matches(const art_leaf *n, const unsigned char *key, int key_len
  * the value pointer is returned.
  */
 void* art_search(const art_tree *t, const unsigned char *key, int key_len) {
-    art_node **child;
-    art_node *n = t->root;
-    int prefix_len, depth = 0;
-    while (n) {
-        // Might be a leaf
-        if (IS_LEAF(n)) {
-            n = (art_node*)LEAF_RAW(n);
-            // Check if the expanded path matches
-            if (!leaf_matches((art_leaf*)n, key, key_len, depth)) {
-                return ((art_leaf*)n)->value;
-            }
-            return NULL;
-        }
+    art_leaf* leaf = art_search_leaf(t, key, key_len);
 
-        // Bail if the prefix does not match
-        if (n->partial_len) {
-            prefix_len = check_prefix(n, key, key_len, depth);
-            if (prefix_len != min(MAX_PREFIX_LEN, n->partial_len))
-                return NULL;
-            depth = depth + n->partial_len;
-        }
-
-        // Recursively search
-        child = find_child(n, depth < key_len ? key[depth]: 0); // Bugfix: https://github.com/armon/libart/issues/42
-        n = (child) ? *child : NULL;
-        depth++;
+    if (leaf == NULL) {
+      return NULL;
     }
-    return NULL;
+
+    return leaf->value;
+}
+
+
+art_leaf* art_search_leaf(const art_tree *t, const unsigned char *key, int key_len) {
+  art_node **child;
+  art_node *n = t->root;
+  int prefix_len, depth = 0;
+  while (n) {
+      // Might be a leaf
+      if (IS_LEAF(n)) {
+          n = (art_node*)LEAF_RAW(n);
+          // Check if the expanded path matches
+          if (!leaf_matches((art_leaf*)n, key, key_len, depth)) {
+              return (art_leaf*)n;
+          }
+          return NULL;
+      }
+
+      // Bail if the prefix does not match
+      if (n->partial_len) {
+          prefix_len = check_prefix(n, key, key_len, depth);
+          if (prefix_len != min(MAX_PREFIX_LEN, n->partial_len))
+              return NULL;
+          depth = depth + n->partial_len;
+      }
+
+      // Recursively search
+      child = find_child(n, depth < key_len ? key[depth]: 0); // Bugfix: https://github.com/armon/libart/issues/42
+      n = (child) ? *child : NULL;
+      depth++;
+  }
+  return NULL;
 }
 
 // Find the minimum leaf under a node
